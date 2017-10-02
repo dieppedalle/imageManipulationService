@@ -72,6 +72,30 @@ def addToDatabase(imageBinary, filename, creationDate, height, width):
     db.session.commit()
 
 
+@app.route("/v1/image")
+def getMetadata():
+    """
+    Route used if the user wants to logout.
+    """
+    fileDatabase = db.session.query(Uploads)
+    
+    result = []
+    
+    # Iterate through the files in the database.
+    for file in fileDatabase:
+        data = {}
+        data['id'] = file.id
+        data['filename'] = file.filename
+        data['creationDate'] = str(file.creationDate)
+        data['fileSize'] = file.fileSize
+        data['fileType'] = file.fileType
+        data['height'] = file.height
+        data['width'] = file.width
+        data['numTimesUpdated'] = file.numTimesUpdated
+        result.append(data)
+    return json.dumps(result)
+
+
 @app.route("/v1/image", methods=['POST'])
 def addImage():
     """
