@@ -76,6 +76,27 @@ def addToDatabase(imageBinary, filename, creationDate, height, width):
     db.session.commit()
 
 
+def updateDatabase(id, imageBinary):
+    """
+    Adds a record to the database.
+    """
+    fileDatabase = db.session.query(Uploads) \
+                     .filter(Uploads.id == id)\
+                     .first()
+    if not fileDatabase:
+        return jsonify(success=0)
+    
+    height, width, _ = getSizeImage(imageBinary)
+    
+    fileDatabase.imageBinary = imageBinary
+    fileDatabase.height = height
+    fileDatabase.width = width
+    fileDatabase.numTimesUpdated += 1
+    db.session.commit()
+    
+    return jsonify(success=1)
+
+
 def isInt(s):
     """
     Checks if the given string can be translated to an integer.
@@ -191,6 +212,19 @@ def addImage():
         height, width, _ = getSizeImage(idata)
         
         addToDatabase(idata, filename, datetime.utcnow(), height, width)
+    return jsonify(success=1)
+
+
+@app.route("/v1/image/<id>", methods=['PUT'])
+def updateImage(id):
+    """
+    Root that redirects the user to the homepage.
+    """
+    if not request.data:
+        return jsonify(success=0)
+    
+    updateDatabase(id, request.data)
+            
     return jsonify(success=1)
 
     
