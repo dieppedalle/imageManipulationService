@@ -19,7 +19,6 @@ db = SQLAlchemy()
 db.init_app(app)
 
 
-
 class Uploads(db.Model):
     """
     SQLAlchemy object for image uploads.
