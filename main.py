@@ -1,9 +1,13 @@
+import cStringIO
 import cv2
+import io
 import json
 import numpy as np
+import PIL.Image
 import sys
+from base64 import b64encode
 from datetime import datetime
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.dialects.sqlite import BLOB
 from werkzeug.utils import secure_filename
@@ -72,6 +76,17 @@ def addToDatabase(imageBinary, filename, creationDate, height, width):
     db.session.commit()
 
 
+def isInt(s):
+    """
+    Checks if the given string can be translated to an integer.
+    """
+    try: 
+        int(s)
+        return True
+    except ValueError:
+        return False
+
+
 @app.route("/v1/image")
 def getMetadata():
     """
@@ -119,6 +134,43 @@ def getMetadataForId(id):
     data['numTimesUpdated'] = fileDatabase.numTimesUpdated
     
     return json.dumps(data)
+
+
+@app.route("/v1/image/<id>/data")
+def getImageForId(id):
+    """
+    Route used if the user wants to logout.
+    """
+    if not isInt(id):
+        return jsonify(success=0)
+        
+    fileDatabase = db.session.query(Uploads).filter(Uploads.id == id).first()
+    
+    if not fileDatabase:
+        return jsonify(success=0)
+    
+    arguments = request.args.get('bbox')
+    if arguments:
+        argumentsList = arguments.split(',')
+        
+        for arg in argumentsList:
+            if not isInt(arg):
+                return jsonify(success=0)
+            
+        argumentsList = map(int, argumentsList)
+        
+        fileStringIO = cStringIO.StringIO(fileDatabase.imageBinary)
+
+        pilImg = PIL.Image.open(fileStringIO)
+        pilImgCropped = pilImg.crop(argumentsList)
+        
+        imgByteArr = io.BytesIO()
+        pilImgCropped.save(imgByteArr, format='PNG')
+        imgByteArr = imgByteArr.getvalue()
+        
+        return render_template('showImage.html', image=b64encode(imgByteArr))
+    
+    return render_template('showImage.html', image=b64encode(fileDatabase.imageBinary))
 
 
 @app.route("/v1/image", methods=['POST'])
