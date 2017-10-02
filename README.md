@@ -40,3 +40,10 @@ Curl Command
 ```
 curl http://localhost:5000/v1/image/1/data?bbox=0,0,100,100
 ```
+
+Update image. Request body should be image data.
+
+Curl Command
+```
+curl --request PUT --upload data.png http://localhost:5000/v1/image/1
+```
