@@ -96,6 +96,31 @@ def getMetadata():
     return json.dumps(result)
 
 
+@app.route("/v1/image/<id>")
+def getMetadataForId(id):
+    """
+    Route used if the user wants to logout.
+    """
+    fileDatabase = db.session.query(Uploads) \
+                     .filter(Uploads.id == id)\
+                     .first()
+    
+    if not fileDatabase:
+        return jsonify(success=0)
+    
+    data = {}
+    data['id'] = fileDatabase.id
+    data['filename'] = fileDatabase.filename
+    data['creationDate'] = str(fileDatabase.creationDate)
+    data['fileSize'] = fileDatabase.fileSize
+    data['fileType'] = fileDatabase.fileType
+    data['height'] = fileDatabase.height
+    data['width'] = fileDatabase.width
+    data['numTimesUpdated'] = fileDatabase.numTimesUpdated
+    
+    return json.dumps(data)
+
+
 @app.route("/v1/image", methods=['POST'])
 def addImage():
     """
