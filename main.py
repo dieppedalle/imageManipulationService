@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 # Define the database containing our tables.
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///imageManipulation.db"
-ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg', 'gif'])
+ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
 
 db = SQLAlchemy()
 db.init_app(app)
