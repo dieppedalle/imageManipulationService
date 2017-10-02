@@ -1,3 +1,4 @@
+import sys
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.dialects.sqlite import BLOB
@@ -9,6 +10,8 @@ app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///imageManipulation.db"
 
 db = SQLAlchemy()
+db.init_app(app)
+
 
 # SQLAlchemy object for user uploads
 class Uploads(db.Model):
@@ -32,3 +35,17 @@ class Uploads(db.Model):
         self.height = height
         self.width = width
         self.numTimesUpdated = 0
+
+    
+if __name__ == "__main__":
+    if "--setup" in sys.argv:
+        """
+        Flag used to create the initial database containing the data. 
+        The setup flag should only be used once to setup the server.
+        """
+        with app.app_context():
+            db.create_all()
+            db.session.commit()
+            print("Database tables created.")
+    else:
+        app.run(debug=True)
