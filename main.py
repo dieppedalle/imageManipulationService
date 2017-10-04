@@ -4,6 +4,7 @@ import io
 import json
 import numpy as np
 import PIL.Image
+import struct
 import sys
 from base64 import b64encode
 from datetime import datetime
@@ -17,11 +18,9 @@ app = Flask(__name__)
 
 # Define the database containing our tables.
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///imageManipulation.db"
-ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
 
 db = SQLAlchemy()
 db.init_app(app)
-
 
 class Uploads(db.Model):
     """
@@ -29,73 +28,70 @@ class Uploads(db.Model):
     """
     __tablename__ = 'Images'
     id = db.Column(db.Integer, primary_key=True)
-    filename = db.Column(db.String(256))
     imageBinary = db.Column(BLOB)
     creationDate = db.Column(db.DateTime)
     fileSize = db.Column(db.Integer)
     fileType = db.Column(db.String(256))
     height = db.Column(db.Integer)
     width = db.Column(db.Integer)
-    numTimesUpdated = db.Column(db.Integer)
+    lastUpdateDate = db.Column(db.DateTime)
 
-    def __init__(self, imageBinary, filename, creationDate, height, width):
+    def __init__(self, imageBinary, creationDate, height, width, imageType):
         self.imageBinary = imageBinary
-        self.filename = filename
         self.creationDate = creationDate
         self.fileSize = len(imageBinary)
-        self.fileType = filename.rsplit('.', 1)[1].lower()
+        self.fileType = imageType
         self.height = height
         self.width = width
-        self.numTimesUpdated = 0
+        self.lastUpdateDate = creationDate
+        
 
 
-def getSizeImage(idata):
+def getImageType(data):
     """
-    Returns the dimensions of the image with binary idata.
+    Returns the image type of the given binary data.
+    Returns empty string if binary data is not an image.
     """
-    nparr = np.fromstring(idata, np.uint8)
-    return cv2.imdecode(nparr, cv2.IMREAD_COLOR).shape
+    if isGif(data):
+        return "GIF"
+    elif isPng(data) or isOldPng(data):
+        return "PNG"
+    elif isJpeg(data):
+        return "JPG"
+    else:
+        return ""
 
-
-def allowed_file(filename):
+def isGif(data):
     """
-    Checks whether or not the file is valid.
+    Checks if image is a GIF. 
+    Takes as input binary data of the image.
+    Returns True if it is, False otherwise.
     """
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return (data[:6] in ('GIF87a', 'GIF89a'))
 
-
-def addToDatabase(imageBinary, filename, creationDate, height, width):
+def isPng(data):
     """
-    Adds a record to the database.
+    Checks if image is a PNG. 
+    Takes as input binary data of the image.
+    Returns True if it is, False otherwise.
     """
-    upload = Uploads(imageBinary=imageBinary, filename = filename, 
-                     creationDate = creationDate, height = height, 
-                     width = width)
-    db.session.add(upload)
-    db.session.commit()
+    return ((data[:8] == '\211PNG\r\n\032\n') and (data[12:16] == 'IHDR'))
 
-
-def updateDatabase(id, imageBinary):
+def isOldPng(data):
     """
-    Adds a record to the database.
+    Checks if image is a PNG (old format). 
+    Takes as input binary data of the image.
+    Returns True if it is, False otherwise.
     """
-    fileDatabase = db.session.query(Uploads) \
-                     .filter(Uploads.id == id)\
-                     .first()
-    if not fileDatabase:
-        return jsonify(success=0)
-    
-    height, width, _ = getSizeImage(imageBinary)
-    
-    fileDatabase.imageBinary = imageBinary
-    fileDatabase.height = height
-    fileDatabase.width = width
-    fileDatabase.numTimesUpdated += 1
-    db.session.commit()
-    
-    return jsonify(success=1)
+    return ((data[:8] == '\211PNG\r\n\032\n') and (data[12:16] != 'IHDR'))
 
+def isJpeg(data):
+    """
+    Checks if image is a JPEG. 
+    Takes as input binary data of the image.
+    Returns True if it is, False otherwise.
+    """
+    return (data[:2] == '\377\330')
 
 def isInt(s):
     """
@@ -107,6 +103,72 @@ def isInt(s):
     except ValueError:
         return False
 
+def getSizeImage(data):
+    """
+    Returns the dimensions of the image with binary data.
+    """
+    # imdecode does not work on gif files so need to calculate the size of
+    # the image manually.
+    if isGif(data):
+        w, h = struct.unpack('<HH', data[6:10])
+        width = int(w)
+        height = int(h)
+        return [width, height]
+    
+    # Function that can be used to compute size of an image.
+    nparr = np.fromstring(data, np.uint8)
+    size = cv2.imdecode(nparr, cv2.IMREAD_COLOR).shape
+    return [size[0], size[1]]
+
+def addToDatabase(imageBinary, creationDate, height, width, imageType):
+    """
+    Adds a record to the database.
+    """
+    upload = Uploads(imageBinary=imageBinary, 
+                     creationDate = creationDate, height = height, 
+                     width = width, imageType = imageType)
+    db.session.add(upload)
+    db.session.commit()
+
+def updateDatabase(id, imageBinary):
+    """
+    Adds a record to the database.
+    """
+    fileDatabase = db.session.query(Uploads) \
+                     .filter(Uploads.id == id)\
+                     .first()
+                     
+    if not fileDatabase:
+        return jsonify(success=0)
+    
+    width, height = getSizeImage(imageBinary)
+    
+    # Update the entries of the row.
+    fileDatabase.imageBinary = imageBinary
+    fileDatabase.height = height
+    fileDatabase.width = width
+    fileDatabase.fileSize = len(imageBinary)
+    fileDatabase.fileType = getImageType(imageBinary)
+    fileDatabase.lastUpdateDate = datetime.utcnow()
+    
+    db.session.commit()
+    
+    return jsonify(success=1)
+
+def createDictMetadata(file):
+    """
+    Creates dictionary of data based on a file object from database.
+    """
+    data = {}
+    data['id'] = file.id
+    data['creationDate'] = str(file.creationDate)
+    data['fileSize'] = file.fileSize
+    data['fileType'] = file.fileType
+    data['height'] = file.height
+    data['width'] = file.width
+    data['lastUpdateDate'] = str(file.lastUpdateDate)
+    
+    return data
 
 @app.route("/v1/image")
 def getMetadata():
@@ -119,18 +181,8 @@ def getMetadata():
     
     # Iterate through the files in the database.
     for file in fileDatabase:
-        data = {}
-        data['id'] = file.id
-        data['filename'] = file.filename
-        data['creationDate'] = str(file.creationDate)
-        data['fileSize'] = file.fileSize
-        data['fileType'] = file.fileType
-        data['height'] = file.height
-        data['width'] = file.width
-        data['numTimesUpdated'] = file.numTimesUpdated
-        result.append(data)
+        result.append(createDictMetadata(file))
     return json.dumps(result)
-
 
 @app.route("/v1/image/<id>")
 def getMetadataForId(id):
@@ -144,18 +196,7 @@ def getMetadataForId(id):
     if not fileDatabase:
         return jsonify(success=0)
     
-    data = {}
-    data['id'] = fileDatabase.id
-    data['filename'] = fileDatabase.filename
-    data['creationDate'] = str(fileDatabase.creationDate)
-    data['fileSize'] = fileDatabase.fileSize
-    data['fileType'] = fileDatabase.fileType
-    data['height'] = fileDatabase.height
-    data['width'] = fileDatabase.width
-    data['numTimesUpdated'] = fileDatabase.numTimesUpdated
-    
-    return json.dumps(data)
-
+    return json.dumps(createDictMetadata(fileDatabase))
 
 @app.route("/v1/image/<id>/data")
 def getImageForId(id):
@@ -170,6 +211,7 @@ def getImageForId(id):
     if not fileDatabase:
         return jsonify(success=0)
     
+    # Checks if we need to crop the image.
     arguments = request.args.get('bbox')
     if arguments:
         argumentsList = arguments.split(',')
@@ -191,8 +233,8 @@ def getImageForId(id):
         
         return render_template('showImage.html', image=b64encode(imgByteArr))
     
-    return render_template('showImage.html', image=b64encode(fileDatabase.imageBinary))
-
+    return render_template('showImage.html', 
+                           image=b64encode(fileDatabase.imageBinary))
 
 @app.route("/v1/image", methods=['POST'])
 def addImage():
@@ -204,16 +246,22 @@ def addImage():
     
     file = request.files['file']
     
+    # Checks if no file have been given.
     if not file:
         return jsonify(success=0)
-    elif allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        idata = file.read()
-        height, width, _ = getSizeImage(idata)
-        
-        addToDatabase(idata, filename, datetime.utcnow(), height, width)
+    
+    idata = file.read()
+    
+    fileType = getImageType(idata)
+    
+    # Checks if file is not an image.
+    if len(fileType) == 0:
+        return jsonify(success=0)
+    
+    width, height = getSizeImage(idata)
+    
+    addToDatabase(idata, datetime.utcnow(), height, width, fileType)
     return jsonify(success=1)
-
 
 @app.route("/v1/image/<id>", methods=['PUT'])
 def updateImage(id):
@@ -223,10 +271,11 @@ def updateImage(id):
     if not request.data:
         return jsonify(success=0)
     
-    updateDatabase(id, request.data)
-            
-    return jsonify(success=1)
-
+    # Checks if file is not an image.
+    if len(getImageType(request.data)) == 0:
+        return jsonify(success=0)
+        
+    return updateDatabase(id, request.data)
 
 @app.errorhandler(404)
 def page_not_found(error):
@@ -236,7 +285,6 @@ def page_not_found(error):
     app.logger.error('Page not found: %s', (request.path))
     return render_template('404.html'), 404
 
-
 @app.errorhandler(500)
 def internal_server_error(error):
     """
@@ -244,7 +292,6 @@ def internal_server_error(error):
     """
     app.logger.error('Server Error: %s', (error))
     return render_template('500.html'), 500
-
 
 @app.errorhandler(Exception)
 def unhandled_exception(error):
@@ -254,7 +301,6 @@ def unhandled_exception(error):
     app.logger.error('Unhandled Exception: %s', (error))
     return render_template('unhandledError.html')
 
-    
 if __name__ == "__main__":
     if "--setup" in sys.argv:
         """
